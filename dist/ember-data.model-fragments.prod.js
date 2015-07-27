@@ -1,855 +1,32 @@
 /*!
  * @overview  Ember Data Model Fragments
- * @copyright Copyright 2014 Lytics Inc. and contributors
+ * @copyright Copyright 2015 Lytics Inc. and contributors
  * @license   Licensed under MIT license
  *            See https://raw.githubusercontent.com/lytics/ember-data.model-fragments/master/LICENSE
- * @version   0.3.3
+ * @version   0.3.3+be9c8c8b
  */
-(function() {
-var define, requireModule, require, requirejs;
 
 (function() {
-  var registry = {}, seen = {};
-
-  define = function(name, deps, callback) {
-    registry[name] = { deps: deps, callback: callback };
-  };
-
-  requirejs = require = requireModule = function(name) {
-    if (seen[name]) { return seen[name]; }
-    seen[name] = {};
-
-    if (!registry[name]) {
-      throw new Error("Could not find module " + name);
-    }
-
-    var mod = registry[name],
-        deps = mod.deps,
-        callback = mod.callback,
-        reified = [],
-        exports;
-
-    for (var i=0, l=deps.length; i<l; i++) {
-      if (deps[i] === 'exports') {
-        reified.push(exports = {});
-      } else {
-        reified.push(requireModule(resolve(deps[i])));
-      }
-    }
-
-    var value = callback.apply(this, reified);
-    return seen[name] = exports || value;
-
-    function resolve(child) {
-      if (child.charAt(0) !== '.') { return child; }
-      var parts = child.split("/");
-      var parentBase = name.split("/").slice(0, -1);
-
-      for (var i=0, l=parts.length; i<l; i++) {
-        var part = parts[i];
-
-        if (part === '..') { parentBase.pop(); }
-        else if (part === '.') { continue; }
-        else { parentBase.push(part); }
-      }
-
-      return parentBase.join("/");
-    }
-  };
-})();
-
-define("core-model", 
-  ["ember","./model","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
-    var Ember = __dependency1__["default"];
-    var Model = __dependency2__["default"];
+    var ember$lib$main$$default = Ember;
+    var ember$data$lib$main$$default = DS;
+    var ember$data$lib$system$model$states$$default = DS.RootState;
+    var ember$data$lib$system$model$$default = DS.Model;
+    var ember$data$lib$system$snapshot$$default = DS.Snapshot;
+    var ember$data$lib$system$store$$default = DS.Store;
+    var ember$data$lib$system$transform$$default = DS.Transform;
 
     /**
       @module ember-data.model-fragments
     */
 
-    // Ember object prototypes are lazy-loaded
-    Model.proto();
-
-    // TODO: is it easier to extend from DS.Model and disable functionality than to
-    // cherry-pick common functionality?
-    var protoProps = [
-      '_setup',
-      '_unhandledEvent',
-      '_createSnapshot',
-      'send',
-      'transitionTo',
-      'isEmpty',
-      'isLoading',
-      'isLoaded',
-      'isDirty',
-      'isSaving',
-      'isDeleted',
-      'isNew',
-      'isValid',
-      'serialize',
-      'changedAttributes',
-      'eachAttribute',
-      'fragmentDidDirty',
-      'fragmentDidReset',
-      'rollbackFragments'
-    ].reduce(function(props, name) {
-      props[name] = Model.prototype[name] || Ember.meta(Model.prototype).descs[name];
-      return props;
-    }, {});
-
-    var classProps = [
-      'attributes',
-      'eachAttribute',
-      'transformedAttributes',
-      'eachTransformedAttribute'
-    ].reduce(function(props, name) {
-      props[name] = Model[name] || Ember.meta(Model).descs[name];
-      return props;
-    }, {});
-
-    /**
-      CoreModel is a base model class that has state management, but no relation or
-      persistence logic.
-
-      @class CoreModel
-    */
-    var CoreModel = Ember.Object.extend(protoProps, {
-      eachRelationship: Ember.K,
-      updateRecordArraysLater: Ember.K
-    });
-
-    CoreModel.reopenClass(classProps, {
-      eachRelationship: Ember.K
-    });
-
-    __exports__["default"] = CoreModel;
-  });
-define("ember", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = Ember;
-  });
-define("fragments/array/fragment", 
-  ["ember","./stateful","../model","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-    var StatefulArray = __dependency2__["default"];
-    var getActualFragmentType = __dependency3__.getActualFragmentType;
-
-    /**
-      @module ember-data.model-fragments
-    */
-
-    var get = Ember.get;
-    var map = Ember.EnumerableUtils.map;
-
-    /**
-      A state-aware array of fragments that is tied to an attribute of a `DS.Model`
-      instance. `FragmentArray` instances should not be created directly, instead
-      use the `DS.hasManyFragments` attribute.
-
-      @class FragmentArray
-      @namespace DS
-      @extends StatefulArray
-    */
-    var FragmentArray = StatefulArray.extend({
-      /**
-        The type of fragments the array contains
-
-        @property type
-        @private
-        @type {String}
-      */
-      type: null,
-
-      options: null,
-
-      init: function() {
-        this._super();
-        this._isInitializing = false;
-      },
-
-      /**
-        @method _processData
-        @private
-        @param {Object} data
-      */
-      _processData: function(data) {
-        var record = get(this, 'owner');
-        var store = get(record, 'store');
-        var declaredType = get(this, 'type');
-        var options = get(this, 'options');
-        var key = get(this, 'name');
-        var content = get(this, 'content');
-
-        // Mark the fragment array as initializing so that state changes are ignored
-        // until after all fragments' data is setup
-        this._isInitializing = true;
-
-        // Map data to existing fragments and create new ones where necessary
-        var processedData = map(Ember.makeArray(data), function(data, i) {
-          var fragment = content[i];
-
-          // Create a new fragment from the data array if needed
-          if (!fragment) {
-            var actualType = getActualFragmentType(declaredType, options, data);
-            fragment = store.buildFragment(actualType);
-
-            fragment.setProperties({
-              _owner : record,
-              _name  : key
-            });
-          }
-
-          // Initialize the fragment with the data
-          fragment.setupData(data);
-
-          return fragment;
-        });
-
-        this._isInitializing = false;
-
-        return processedData;
-      },
-
-      /**
-        @method _createSnapshot
-        @private
-      */
-      _createSnapshot: function() {
-        // Snapshot each fragment
-        return map(this, function(fragment) {
-          return fragment._createSnapshot();
-        });
-      },
-
-      /**
-        @method adapterDidCommit
-      */
-      adapterDidCommit: function() {
-        this._super();
-
-        // Notify all records of commit
-        this.invoke('adapterDidCommit');
-      },
-
-      /**
-        If this property is `true`, either the contents of the array do not match
-        its original state, or one or more of the fragments in the array are dirty.
-
-        Example
-
-        ```javascript
-        array.toArray(); // [ <Fragment:1>, <Fragment:2> ]
-        array.get('isDirty'); // false
-        array.get('firstObject').set('prop', 'newValue');
-        array.get('isDirty'); // true
-        ```
-
-        @property isDirty
-        @type {Boolean}
-        @readOnly
-      */
-      isDirty: function() {
-        return this._super() || this.isAny('isDirty');
-      }.property('@each.isDirty', '_originalState'),
-
-      /**
-        This method reverts local changes of the array's contents to its original
-        state, and calls `rollback` on each fragment.
-
-        Example
-
-        ```javascript
-        array.get('firstObject').get('isDirty'); // true
-        array.get('isDirty'); // true
-        array.rollback();
-        array.get('firstObject').get('isDirty'); // false
-        array.get('isDirty'); // false
-        ```
-
-        @method rollback
-      */
-      rollback: function() {
-        this._super();
-        this.invoke('rollback');
-      },
-
-      /**
-        Serializing a fragment array returns a new array containing the results of
-        calling `serialize` on each fragment in the array.
-
-        @method serialize
-        @return {Array}
-      */
-      serialize: function() {
-        return this.invoke('serialize');
-      },
-
-      replaceContent: function(idx, amt, fragments) {
-        var array = this;
-        var record = get(this, 'owner');
-        var key = get(this, 'name');
-
-        // Since all array manipulation methods end up using this method, ensure
-        // ensure that fragments are the correct type and have an owner and name
-        if (fragments) {
-          fragments.forEach(function(fragment) {
-            var owner = get(fragment, '_owner');
-
-                        
-            if (!owner) {
-              fragment.setProperties({
-                _owner : record,
-                _name  : key
-              });
-            }
-          });
-        }
-
-        return get(this, 'content').replace(idx, amt, fragments);
-      },
-
-      /**
-        Adds an existing fragment to the end of the fragment array. Alias for
-        `addObject`.
-
-        @method addFragment
-        @param {DS.ModelFragment} fragment
-        @return {DS.ModelFragment} the newly added fragment
-      */
-      addFragment: function(fragment) {
-        return this.addObject(fragment);
-      },
-
-      /**
-        Removes the given fragment from the array. Alias for `removeObject`.
-
-        @method removeFragment
-        @param {DS.ModelFragment} fragment
-        @return {DS.ModelFragment} the removed fragment
-      */
-      removeFragment: function(fragment) {
-        return this.removeObject(fragment);
-      },
-
-      /**
-        Creates a new fragment of the fragment array's type and adds it to the end
-        of the fragment array
-
-        @method createFragment
-        @param {DS.ModelFragment} fragment
-        @return {DS.ModelFragment} the newly added fragment
-        */
-      createFragment: function(props) {
-        var record = get(this, 'owner');
-        var store = get(record, 'store');
-        var type = get(this, 'type');
-        var fragment = store.createFragment(type, props);
-
-        return this.pushObject(fragment);
-      }
-    });
-
-    __exports__["default"] = FragmentArray;
-  });
-define("fragments/array/stateful", 
-  ["ember","exports"],
-  function(__dependency1__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-
-    /**
-      @module ember-data.model-fragments
-    */
-
-    var get = Ember.get;
-    var set = Ember.set;
-    var splice = Array.prototype.splice;
-
-    /**
-      A state-aware array that is tied to an attribute of a `DS.Model` instance.
-
-      @class StatefulArray
-      @namespace DS
-      @extends Ember.ArrayProxy
-    */
-    var StatefulArray = Ember.ArrayProxy.extend({
-      /**
-        A reference to the array's owner record.
-
-        @property owner
-        @private
-        @type {DS.Model}
-      */
-      owner: null,
-
-      /**
-        The array's property name on the owner record.
-
-        @property name
-        @private
-        @type {String}
-      */
-      name: null,
-
-      init: function() {
-        this._super();
-        this._pendingData = undefined;
-        set(this, '_originalState', []);
-      },
-
-      content: function() {
-        return Ember.A();
-      }.property(),
-
-      /**
-        @method setupData
-        @private
-        @param {Object} data
-      */
-      setupData: function(data) {
-        // Since replacing the contents of the array can trigger changes to fragment
-        // array properties, this method can get invoked recursively with the same
-        // data, so short circuit here once it's been setup the first time
-        if (this._pendingData === data) {
-          return;
-        }
-
-        this._pendingData = data;
-
-        var processedData = this._processData(data);
-
-        // This data is canonical, so create rollback point
-        set(this, '_originalState', processedData);
-
-        // Completely replace the contents with the new data
-        this.replaceContent(0, get(this, 'content.length'), processedData);
-
-        this._pendingData = undefined;
-      },
-
-      /**
-        @method _processData
-        @private
-        @param {Object} data
-      */
-      _processData: function(data) {
-        // Simply ensure that the data is an actual array
-        return Ember.makeArray(data);
-      },
-
-      /**
-        @method _createSnapshot
-        @private
-      */
-      _createSnapshot: function() {
-        // Since elements are not models, a snapshot is simply a mapping of raw values
-        return this.toArray();
-      },
-
-      /**
-        @method adapterDidCommit
-      */
-      adapterDidCommit: function() {
-        // Fragment array has been persisted; use the current state as the original state
-        set(this, '_originalState', this.toArray());
-      },
-
-      /**
-        If this property is `true` the contents of the array do not match its
-        original state. The array has local changes that have not yet been saved by
-        the adapter. This includes additions, removals, and reordering of elements.
-
-        Example
-
-        ```javascript
-        array.toArray(); // [ 'Tom', 'Yehuda' ]
-        array.get('isDirty'); // false
-        array.popObject(); // 'Yehuda'
-        array.get('isDirty'); // true
-        ```
-
-        @property isDirty
-        @type {Boolean}
-        @readOnly
-      */
-      isDirty: function() {
-        return Ember.compare(this.toArray(), get(this, '_originalState')) !== 0;
-      }.property('[]', '_originalState'),
-
-      /**
-        This method reverts local changes of the array's contents to its original
-        state.
-
-        Example
-
-        ```javascript
-        array.toArray(); // [ 'Tom', 'Yehuda' ]
-        array.popObject(); // 'Yehuda'
-        array.toArray(); // [ 'Tom' ]
-        array.rollback();
-        array.toArray(); // [ 'Tom', 'Yehuda' ]
-        ```
-
-        @method rollback
-      */
-      rollback: function() {
-        this.setObjects(get(this, '_originalState'));
-      },
-
-      /**
-        Method alias for `toArray`.
-
-        @method serialize
-        @return {Array}
-      */
-      serialize: function() {
-        return this.toArray();
-      },
-
-      arrayContentDidChange: function() {
-        this._super.apply(this, arguments);
-
-        var record = get(this, 'owner');
-        var key = get(this, 'name');
-
-        // Any change to the size of the fragment array means a potential state change
-        if (this.get('isDirty')) {
-          record.fragmentDidDirty(key, this);
-        } else {
-          record.fragmentDidReset(key, this);
-        }
-      },
-
-      toStringExtension: function() {
-        return 'owner(' + get(this, 'owner.id') + ')';
-      }
-    });
-
-    __exports__["default"] = StatefulArray;
-  });
-define("fragments/attributes", 
-  ["ember","../util/ember-new-computed","./array/stateful","./array/fragment","./model","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-    var computedPolyfill = __dependency2__["default"];
-    var StatefulArray = __dependency3__["default"];
-    var FragmentArray = __dependency4__["default"];
-    var getActualFragmentType = __dependency5__.getActualFragmentType;
-
-    /**
-      @module ember-data.model-fragments
-    */
-
-    var get = Ember.get;
-
-    function setFragmentOwner(fragment, record, key) {
-            return fragment.setProperties({
-        _owner : record,
-        _name  : key
-      });
-    }
-
-
-    /**
-      `DS.hasOneFragment` defines an attribute on a `DS.Model` or `DS.ModelFragment`
-      instance. Much like `DS.belongsTo`, it creates a property that returns a
-      single fragment of the given type.
-
-      `DS.hasOneFragment` takes an optional hash as a second parameter, currently
-      supported options are:
-
-      - `defaultValue`: An object literal or a function to be called to set the
-        attribute to a default value if none is supplied. Values are deep copied
-        before being used. Note that default values will be passed through the
-        fragment's serializer when creating the fragment.
-
-      Example
-
-      ```javascript
-      App.Person = DS.Model.extend({
-        name: DS.hasOneFragment('name', { defaultValue: {} })
-      });
-
-      App.Name = DS.ModelFragment.extend({
-        first  : DS.attr('string'),
-        last   : DS.attr('string')
-      });
-      ```
-
-      @namespace
-      @method hasOneFragment
-      @for DS
-      @param {String} type the fragment type
-      @param {Object} options a hash of options
-      @return {Attribute}
-    */
-    function hasOneFragment(declaredTypeName, options) {
-      options = options || {};
-
-      var meta = {
-        type: 'fragment',
-        isAttribute: true,
-        isFragment: true,
-        options: options
-      };
-
-      function setupFragment(record, key, value) {
-        var store = record.store;
-        var data = record._data[key] || getDefaultValue(record, options, 'object');
-        var fragment = record._fragments[key];
-        var actualTypeName = getActualFragmentType(declaredTypeName, options, data);
-
-        // Regardless of whether being called as a setter or getter, the fragment
-        // may not be initialized yet, in which case the data will contain a
-        // raw response or a stashed away fragment
-
-        // If we already have a processed fragment in _data and our current fragmet is
-        // null simply reuse the one from data. We can be in this state after a rollback
-        // for example
-        if (!fragment && isInstanceOfType(store.modelFor(actualTypeName), data)) {
-          fragment = data;
-        // Else initialize the fragment
-        } else if (data && data !== fragment) {
-          fragment || (fragment = setFragmentOwner(store.buildFragment(actualTypeName), record, key));
-          //Make sure to first cache the fragment before calling setupData, so if setupData causes this CP to be accessed
-          //again we have it cached already
-          record._data[key] = fragment;
-          fragment.setupData(data);
-        } else {
-          // Handle the adapter setting the fragment to null
-          fragment = data;
-        }
-
-        return fragment;
-      }
-
-      return computedPolyfill({
-        set: function(key, value) {
-          var fragment = setupFragment(this, key, value);
-          var store = this.store;
-
-                    fragment = value ? setFragmentOwner(value, this, key) : null;
-
-          if (this._data[key] !== fragment) {
-            this.fragmentDidDirty(key, fragment);
-          } else {
-            this.fragmentDidReset(key, fragment);
-          }
-
-          return this._fragments[key] = fragment;
-        },
-        get: function(key) {
-          var fragment = setupFragment(this, key);
-          return this._fragments[key] = fragment;
-        }
-      }).meta(meta);
-    }
-
-    // Check whether a fragment is an instance of the given type, respecting model
-    // factory injections
-    function isInstanceOfType(type, fragment) {
-      if (fragment instanceof type) {
-        return true;
-      } else if (Ember.MODEL_FACTORY_INJECTIONS) {
-        return fragment instanceof type.superclass;
-      }
-
-      return false;
-    }
-
-    /**
-      `DS.hasManyFragments` defines an attribute on a `DS.Model` or
-      `DS.ModelFragment` instance. Much like `DS.hasMany`, it creates a property
-      that returns an array of fragments of the given type. The array is aware of
-      its original state and so has a `isDirty` property and a `rollback` method.
-      If a fragment type is not given, values are not converted to fragments, but
-      passed straight through.
-
-      `DS.hasOneFragment` takes an optional hash as a second parameter, currently
-      supported options are:
-
-      - `defaultValue`: An array literal or a function to be called to set the
-        attribute to a default value if none is supplied. Values are deep copied
-        before being used. Note that default values will be passed through the
-        fragment's serializer when creating the fragment.
-
-      Example
-
-      ```javascript
-      App.Person = DS.Model.extend({
-        addresses: DS.hasManyFragments('name', { defaultValue: [] })
-      });
-
-      App.Address = DS.ModelFragment.extend({
-        street  : DS.attr('string'),
-        city    : DS.attr('string'),
-        region  : DS.attr('string'),
-        country : DS.attr('string')
-      });
-      ```
-
-      @namespace
-      @method hasManyFragments
-      @for DS
-      @param {String} type the fragment type (optional)
-      @param {Object} options a hash of options
-      @return {Attribute}
-    */
-    function hasManyFragments(declaredTypeName, options) {
-      // If a declaredTypeName is not given, it implies an array of primitives
-      if (Ember.typeOf(declaredTypeName) !== 'string') {
-        options = declaredTypeName;
-        declaredTypeName = null;
-      }
-
-      options = options || {};
-
-      var meta = {
-        type: 'fragment',
-        isAttribute: true,
-        isFragment: true,
-        options: options,
-        kind: 'hasMany'
-      };
-
-      function createArray(record, key) {
-        var arrayClass = declaredTypeName ? FragmentArray : StatefulArray;
-
-        return arrayClass.create({
-          type    : declaredTypeName,
-          options : options,
-          name    : key,
-          owner   : record
-        });
-      }
-
-      function setupArrayFragment(record, key, value) {
-        var data = record._data[key] || getDefaultValue(record, options, 'array');
-        var fragments = record._fragments[key] || null;
-
-        //If we already have a processed fragment in _data and our current fragmet is
-        //null simply reuse the one from data. We can be in this state after a rollback
-        //for example
-        if (data instanceof StatefulArray && !fragments) {
-          fragments = data;
-        // Create a fragment array and initialize with data
-        } else if (data && data !== fragments) {
-          fragments || (fragments = createArray(record, key));
-          record._data[key] = fragments;
-          fragments.setupData(data);
-        } else {
-          // Handle the adapter setting the fragment array to null
-          fragments = data;
-        }
-
-        return fragments;
-      }
-
-      return computedPolyfill({
-        set: function(key, value) {
-          var fragments = setupArrayFragment(this, key, value);
-
-          if (Ember.isArray(value)) {
-            fragments || (fragments = createArray(this, key));
-            fragments.setObjects(value);
-          } else if (value === null) {
-            fragments = null;
-          } else {
-                      }
-
-          if (this._data[key] !== fragments || get(fragments, 'isDirty')) {
-            this.fragmentDidDirty(key, fragments);
-          } else {
-            this.fragmentDidReset(key, fragments);
-          }
-
-          return this._fragments[key] = fragments;
-        },
-        get: function(key) {
-          var fragments = setupArrayFragment(this, key);
-          return this._fragments[key] = fragments;
-        }
-      }).meta(meta);
-    }
-
-    // Like `DS.belongsTo`, when used within a model fragment is a reference
-    // to the owner record
-    /**
-      `DS.fragmentOwner` defines a read-only attribute on a `DS.ModelFragment`
-      instance. The attribute returns a reference to the fragment's owner
-      record.
-
-      Example
-
-      ```javascript
-      App.Person = DS.Model.extend({
-        name: DS.hasOneFragment('name')
-      });
-
-      App.Name = DS.ModelFragment.extend({
-        first  : DS.attr('string'),
-        last   : DS.attr('string'),
-        person : DS.fragmentOwner()
-      });
-      ```
-
-      @namespace
-      @method fragmentOwner
-      @for DS
-      @return {Attribute}
-    */
-    function fragmentOwner() {
-      // TODO: add a warning when this is used on a non-fragment
-      return Ember.computed.alias('_owner').readOnly();
-    }
-
-    // The default value of a fragment is either an array or an object,
-    // which should automatically get deep copied
-    function getDefaultValue(record, options, type) {
-      var value;
-
-      if (typeof options.defaultValue === "function") {
-        value = options.defaultValue();
-      } else if (options.defaultValue) {
-        value = options.defaultValue;
-      } else {
-        return null;
-      }
-
-      
-      // Create a deep copy of the resulting value to avoid shared reference errors
-      return Ember.copy(value, true);
-    }
-
-    __exports__.hasOneFragment = hasOneFragment;
-    __exports__.hasManyFragments = hasManyFragments;
-    __exports__.fragmentOwner = fragmentOwner;
-  });
-define("fragments/ext", 
-  ["../store","../model","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
-    "use strict";
-    var Store = __dependency1__["default"];
-    var Model = __dependency2__["default"];
-
-    /**
-      @module ember-data.model-fragments
-    */
-
-    var get = Ember.get;
+    var model$fragments$lib$fragments$ext$$get = Ember.get;
 
     /**
       @class Store
       @namespace DS
     */
-    Store.reopen({
+    ember$data$lib$system$store$$default.reopen({
       /**
         Build a new fragment of the given type with injections
         applied that starts in the 'empty' state.
@@ -865,7 +42,8 @@ define("fragments/ext",
         // TODO: ModelFragment should be able to be referenced by an import here,
         // but because CoreModel depends on the changes to DS.Model in this file,
         // it would create a circular reference
-        
+        Ember.assert("The '" + type + "' model must be a subclass of DS.ModelFragment", DS.ModelFragment.detect(type));
+
         return type.create({
           store: this
         });
@@ -908,7 +86,7 @@ define("fragments/ext",
       @class Model
       @namespace DS
       */
-    Model.reopen({
+    ember$data$lib$system$model$$default.reopen({
       _setup: function() {
         this._super();
         this._fragments = {};
@@ -1041,7 +219,7 @@ define("fragments/ext",
         @private
       */
       fragmentDidDirty: function(key, fragment) {
-        if (!get(this, 'isDeleted')) {
+        if (!model$fragments$lib$fragments$ext$$get(this, 'isDeleted')) {
           // Add the fragment as a placeholder in the owner record's
           // `_attributes` hash to indicate it is dirty
           this._attributes[key] = fragment;
@@ -1062,28 +240,398 @@ define("fragments/ext",
         // Don't reset if the record is new, otherwise it will enter the 'deleted' state
         // NOTE: This case almost never happens with attributes because their initial value
         // is always undefined, which is *usually* not what attributes get 'reset' to
-        if (!get(this, 'isNew')) {
+        if (!model$fragments$lib$fragments$ext$$get(this, 'isNew')) {
           this.send('propertyWasReset', key);
         }
       }
     });
 
-    __exports__.Store = Store;
-    __exports__.Model = Model;
-  });
-define("fragments/model", 
-  ["ember","../core-model","./states","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-    var CoreModel = __dependency2__["default"];
-    var FragmentRootState = __dependency3__["default"];
+    /**
+      @module ember-data.model-fragments
+    */
+
+    // Ember object prototypes are lazy-loaded
+    ember$data$lib$system$model$$default.proto();
+
+    // TODO: is it easier to extend from DS.Model and disable functionality than to
+    // cherry-pick common functionality?
+    var model$fragments$lib$core$model$$protoProps = [
+      '_setup',
+      '_unhandledEvent',
+      '_createSnapshot',
+      'send',
+      'transitionTo',
+      'isEmpty',
+      'isLoading',
+      'isLoaded',
+      'isDirty',
+      'isSaving',
+      'isDeleted',
+      'isNew',
+      'isValid',
+      'serialize',
+      'changedAttributes',
+      'eachAttribute',
+      'fragmentDidDirty',
+      'fragmentDidReset',
+      'rollbackFragments'
+    ].reduce(function(props, name) {
+      props[name] = ember$data$lib$system$model$$default.prototype[name] || ember$lib$main$$default.meta(ember$data$lib$system$model$$default.prototype).descs[name];
+      return props;
+    }, {});
+
+    var model$fragments$lib$core$model$$classProps = [
+      'attributes',
+      'eachAttribute',
+      'transformedAttributes',
+      'eachTransformedAttribute'
+    ].reduce(function(props, name) {
+      props[name] = ember$data$lib$system$model$$default[name] || ember$lib$main$$default.meta(ember$data$lib$system$model$$default).descs[name];
+      return props;
+    }, {});
+
+    /**
+      CoreModel is a base model class that has state management, but no relation or
+      persistence logic.
+
+      @class CoreModel
+    */
+    var model$fragments$lib$core$model$$CoreModel = ember$lib$main$$default.Object.extend(model$fragments$lib$core$model$$protoProps, {
+      eachRelationship: ember$lib$main$$default.K,
+      updateRecordArraysLater: ember$lib$main$$default.K
+    });
+
+    model$fragments$lib$core$model$$CoreModel.reopenClass(model$fragments$lib$core$model$$classProps, {
+      eachRelationship: ember$lib$main$$default.K
+    });
+
+    var model$fragments$lib$core$model$$default = model$fragments$lib$core$model$$CoreModel;
 
     /**
       @module ember-data.model-fragments
     */
 
-    var get = Ember.get;
+    var model$fragments$lib$fragments$array$stateful$$get = ember$lib$main$$default.get;
+    var model$fragments$lib$fragments$array$stateful$$set = ember$lib$main$$default.set;
+    var model$fragments$lib$fragments$array$stateful$$splice = Array.prototype.splice;
+
+    /**
+      A state-aware array that is tied to an attribute of a `DS.Model` instance.
+
+      @class StatefulArray
+      @namespace DS
+      @extends Ember.ArrayProxy
+    */
+    var model$fragments$lib$fragments$array$stateful$$StatefulArray = ember$lib$main$$default.ArrayProxy.extend({
+      /**
+        A reference to the array's owner record.
+
+        @property owner
+        @private
+        @type {DS.Model}
+      */
+      owner: null,
+
+      /**
+        The array's property name on the owner record.
+
+        @property name
+        @private
+        @type {String}
+      */
+      name: null,
+
+      init: function() {
+        this._super();
+        this._pendingData = undefined;
+        model$fragments$lib$fragments$array$stateful$$set(this, '_originalState', []);
+      },
+
+      content: function() {
+        return ember$lib$main$$default.A();
+      }.property(),
+
+      /**
+        @method setupData
+        @private
+        @param {Object} data
+      */
+      setupData: function(data) {
+        // Since replacing the contents of the array can trigger changes to fragment
+        // array properties, this method can get invoked recursively with the same
+        // data, so short circuit here once it's been setup the first time
+        if (this._pendingData === data) {
+          return;
+        }
+
+        this._pendingData = data;
+
+        var processedData = this._processData(data);
+
+        // This data is canonical, so create rollback point
+        model$fragments$lib$fragments$array$stateful$$set(this, '_originalState', processedData);
+
+        // Completely replace the contents with the new data
+        this.replaceContent(0, model$fragments$lib$fragments$array$stateful$$get(this, 'content.length'), processedData);
+
+        this._pendingData = undefined;
+      },
+
+      /**
+        @method _processData
+        @private
+        @param {Object} data
+      */
+      _processData: function(data) {
+        // Simply ensure that the data is an actual array
+        return ember$lib$main$$default.makeArray(data);
+      },
+
+      /**
+        @method _createSnapshot
+        @private
+      */
+      _createSnapshot: function() {
+        // Since elements are not models, a snapshot is simply a mapping of raw values
+        return this.toArray();
+      },
+
+      /**
+        @method adapterDidCommit
+      */
+      adapterDidCommit: function() {
+        // Fragment array has been persisted; use the current state as the original state
+        model$fragments$lib$fragments$array$stateful$$set(this, '_originalState', this.toArray());
+      },
+
+      /**
+        If this property is `true` the contents of the array do not match its
+        original state. The array has local changes that have not yet been saved by
+        the adapter. This includes additions, removals, and reordering of elements.
+
+        Example
+
+        ```javascript
+        array.toArray(); // [ 'Tom', 'Yehuda' ]
+        array.get('isDirty'); // false
+        array.popObject(); // 'Yehuda'
+        array.get('isDirty'); // true
+        ```
+
+        @property isDirty
+        @type {Boolean}
+        @readOnly
+      */
+      isDirty: function() {
+        return ember$lib$main$$default.compare(this.toArray(), model$fragments$lib$fragments$array$stateful$$get(this, '_originalState')) !== 0;
+      }.property('[]', '_originalState'),
+
+      /**
+        This method reverts local changes of the array's contents to its original
+        state.
+
+        Example
+
+        ```javascript
+        array.toArray(); // [ 'Tom', 'Yehuda' ]
+        array.popObject(); // 'Yehuda'
+        array.toArray(); // [ 'Tom' ]
+        array.rollback();
+        array.toArray(); // [ 'Tom', 'Yehuda' ]
+        ```
+
+        @method rollback
+      */
+      rollback: function() {
+        this.setObjects(model$fragments$lib$fragments$array$stateful$$get(this, '_originalState'));
+      },
+
+      /**
+        Method alias for `toArray`.
+
+        @method serialize
+        @return {Array}
+      */
+      serialize: function() {
+        return this.toArray();
+      },
+
+      arrayContentDidChange: function() {
+        this._super.apply(this, arguments);
+
+        var record = model$fragments$lib$fragments$array$stateful$$get(this, 'owner');
+        var key = model$fragments$lib$fragments$array$stateful$$get(this, 'name');
+
+        // Any change to the size of the fragment array means a potential state change
+        if (this.get('isDirty')) {
+          record.fragmentDidDirty(key, this);
+        } else {
+          record.fragmentDidReset(key, this);
+        }
+      },
+
+      toStringExtension: function() {
+        return 'owner(' + model$fragments$lib$fragments$array$stateful$$get(this, 'owner.id') + ')';
+      }
+    });
+
+    var model$fragments$lib$fragments$array$stateful$$default = model$fragments$lib$fragments$array$stateful$$StatefulArray;
+
+    /**
+      @module ember-data.model-fragments
+    */
+
+    var model$fragments$lib$fragments$states$$get = ember$lib$main$$default.get;
+
+    var model$fragments$lib$fragments$states$$didSetProperty = ember$data$lib$system$model$states$$default.loaded.saved.didSetProperty;
+    var model$fragments$lib$fragments$states$$propertyWasReset = ember$data$lib$system$model$states$$default.loaded.updated.uncommitted.propertyWasReset;
+
+    var model$fragments$lib$fragments$states$$dirtySetup = function(fragment) {
+      var record = model$fragments$lib$fragments$states$$get(fragment, '_owner');
+      var key = model$fragments$lib$fragments$states$$get(fragment, '_name');
+
+      // A newly created fragment may not have an owner yet
+      if (record) {
+        record.fragmentDidDirty(key, fragment);
+      }
+    };
+
+    /**
+      Like `DS.Model` instances, all fragments have a `currentState` property
+      that reflects where they are in the model lifecycle. However, there are much
+      fewer states that a fragment can be in, since the `loading` state doesn't
+      apply, `inFlight` states are no different than the owner record's, and there
+      is no concept of a `deleted` state.
+
+      This is the simplified hierarchy of valid states for a fragment:
+
+      ```text
+      * root
+        * empty
+        * loaded
+          * created
+          * saved
+          * updated
+      ```
+
+      Note that there are no `uncommitted` sub-states because it's implied by the
+      `created` and `updated` states (since there are no `inFlight` substates).
+
+      @class FragmentRootState
+    */
+    var model$fragments$lib$fragments$states$$FragmentRootState = {
+      // Include all `DS.Model` state booleans for consistency
+      isEmpty: false,
+      isLoading: false,
+      isLoaded: false,
+      isDirty: false,
+      isSaving: false,
+      isDeleted: false,
+      isNew: false,
+      isValid: true,
+
+      didSetProperty: model$fragments$lib$fragments$states$$didSetProperty,
+
+      propertyWasReset: ember$lib$main$$default.K,
+
+      becomeDirty: ember$lib$main$$default.K,
+
+      rolledBack: ember$lib$main$$default.K,
+
+      empty: {
+        isEmpty: true,
+
+        loadedData: function(fragment) {
+          fragment.transitionTo('loaded.created');
+        },
+
+        pushedData: function(fragment) {
+          fragment.transitionTo('loaded.saved');
+        }
+      },
+
+      loaded: {
+        pushedData: function(fragment) {
+          fragment.transitionTo('saved');
+        },
+
+        saved: {
+          setup: function(fragment) {
+            var record = model$fragments$lib$fragments$states$$get(fragment, '_owner');
+            var key = model$fragments$lib$fragments$states$$get(fragment, '_name');
+
+            // Abort if fragment is still initializing
+            if (!record._fragments[key] || fragment._isInitializing) { return; }
+
+            // Reset the property on the owner record if no other siblings
+            // are dirty (or there are no siblings)
+            if (!model$fragments$lib$fragments$states$$get(record, key + '.isDirty')) {
+              record.fragmentDidReset(key, fragment);
+            }
+          },
+
+          pushedData: ember$lib$main$$default.K,
+
+          becomeDirty: function(fragment) {
+            fragment.transitionTo('updated');
+          }
+        },
+
+        created: {
+          isDirty: true,
+
+          setup: model$fragments$lib$fragments$states$$dirtySetup,
+        },
+
+        updated: {
+          isDirty: true,
+
+          setup: model$fragments$lib$fragments$states$$dirtySetup,
+
+          propertyWasReset: model$fragments$lib$fragments$states$$propertyWasReset,
+
+          rolledBack: function(fragment) {
+            fragment.transitionTo('saved');
+          }
+        }
+      }
+    };
+
+    function model$fragments$lib$fragments$states$$mixin(original, hash) {
+      for (var prop in hash) {
+        original[prop] = hash[prop];
+      }
+
+      return original;
+    }
+
+    // Wouldn't it be awesome if this was public?
+    function model$fragments$lib$fragments$states$$wireState(object, parent, name) {
+      object = model$fragments$lib$fragments$states$$mixin(parent ? ember$lib$main$$default.create(parent) : {}, object);
+      object.parentState = parent;
+      object.stateName = name;
+
+      for (var prop in object) {
+        if (!object.hasOwnProperty(prop) || prop === 'parentState' || prop === 'stateName') {
+          continue;
+        }
+        if (typeof object[prop] === 'object') {
+          object[prop] = model$fragments$lib$fragments$states$$wireState(object[prop], object, name + "." + prop);
+        }
+      }
+
+      return object;
+    }
+
+    model$fragments$lib$fragments$states$$FragmentRootState = model$fragments$lib$fragments$states$$wireState(model$fragments$lib$fragments$states$$FragmentRootState, null, 'root');
+
+    var model$fragments$lib$fragments$states$$default = model$fragments$lib$fragments$states$$FragmentRootState;
+
+    /**
+      @module ember-data.model-fragments
+    */
+
+    var model$fragments$lib$fragments$model$$get = ember$lib$main$$default.get;
 
     /**
       The class that all nested object structures, or 'fragments', descend from.
@@ -1142,7 +690,7 @@ define("fragments/model",
       @uses Ember.Comparable
       @uses Ember.Copyable
     */
-    var ModelFragment = CoreModel.extend(Ember.Comparable, Ember.Copyable, {
+    var model$fragments$lib$fragments$model$$ModelFragment = model$fragments$lib$core$model$$default.extend(ember$lib$main$$default.Comparable, ember$lib$main$$default.Copyable, {
       /**
         The fragment's property name on the owner record.
 
@@ -1168,7 +716,7 @@ define("fragments/model",
         @private
         @type {Object}
       */
-      currentState: FragmentRootState.empty,
+      currentState: model$fragments$lib$fragments$states$$default.empty,
 
       /**
         @method setupData
@@ -1176,7 +724,7 @@ define("fragments/model",
         @param {Object} data
       */
       setupData: function(data) {
-        var store = get(this, 'store');
+        var store = model$fragments$lib$fragments$model$$get(this, 'store');
         var type = store.modelFor(this.constructor);
         var serializer = store.serializerFor(type);
 
@@ -1190,7 +738,7 @@ define("fragments/model",
         this.send('pushedData');
 
         // Changed properties must be notified manually
-        notifyProperties(this, Ember.keys(data));
+        model$fragments$lib$fragments$model$$notifyProperties(this, ember$lib$main$$default.keys(data));
       },
 
       /**
@@ -1211,7 +759,7 @@ define("fragments/model",
         @method rollback
       */
       rollback: function() {
-        var toNotify = Ember.keys(this._attributes);
+        var toNotify = ember$lib$main$$default.keys(this._attributes);
         this._attributes = {};
 
         // Rollback fragments from the bottom up
@@ -1221,7 +769,7 @@ define("fragments/model",
         this.send('rolledBack');
 
         // Changed properties must be notified manually
-        notifyProperties(this, toNotify);
+        model$fragments$lib$fragments$model$$notifyProperties(this, toNotify);
       },
 
       /**
@@ -1245,13 +793,13 @@ define("fragments/model",
         @return {DS.ModelFragment} the newly created fragment
       */
       copy: function() {
-        var store = get(this, 'store');
+        var store = model$fragments$lib$fragments$model$$get(this, 'store');
         var type = store.modelFor(this.constructor);
         var data = {};
 
         // TODO: handle copying sub-fragments
-        Ember.merge(data, this._data);
-        Ember.merge(data, this._attributes);
+        ember$lib$main$$default.merge(data, this._data);
+        ember$lib$main$$default.merge(data, this._attributes);
 
         return this.store.createFragment(type, data);
       },
@@ -1261,8 +809,8 @@ define("fragments/model",
       */
       adapterDidCommit: function() {
         // Merge in-flight attributes if any
-        if (Ember.keys(this._inFlightAttributes).length) {
-          Ember.mixin(this._data, this._inFlightAttributes);
+        if (ember$lib$main$$default.keys(this._inFlightAttributes).length) {
+          ember$lib$main$$default.mixin(this._data, this._inFlightAttributes);
           this._inFlightAttributes = {};
         }
 
@@ -1280,7 +828,7 @@ define("fragments/model",
       },
 
       toStringExtension: function() {
-        return 'owner(' + get(this, '_owner.id') + ')';
+        return 'owner(' + model$fragments$lib$fragments$model$$get(this, '_owner.id') + ')';
       },
 
       init: function() {
@@ -1289,12 +837,12 @@ define("fragments/model",
       }
     });
 
-    function notifyProperties(context, propNames) {
-      Ember.beginPropertyChanges();
+    function model$fragments$lib$fragments$model$$notifyProperties(context, propNames) {
+      ember$lib$main$$default.beginPropertyChanges();
       for (var i = 0, l = propNames.length; i < l; i++) {
         context.notifyPropertyChange(propNames[i]);
       }
-      Ember.endPropertyChanges();
+      ember$lib$main$$default.endPropertyChanges();
     }
 
     /**
@@ -1307,7 +855,7 @@ define("fragments/model",
      * @param {Object} data the fragment data
      * @return {String} the actual fragment type
      */
-    function getActualFragmentType(declaredType, options, data) {
+    function model$fragments$lib$fragments$model$$getActualFragmentType(declaredType, options, data) {
       if (!options.polymorphic || !data) {
         return declaredType;
       }
@@ -1318,330 +866,244 @@ define("fragments/model",
       return actualType || declaredType;
     }
 
-    __exports__["default"] = ModelFragment;
-    __exports__.getActualFragmentType = getActualFragmentType;
-  });
-define("fragments/states", 
-  ["ember","../states","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-    var RootState = __dependency2__["default"];
+    var model$fragments$lib$fragments$model$$default = model$fragments$lib$fragments$model$$ModelFragment;
 
     /**
       @module ember-data.model-fragments
     */
 
-    var get = Ember.get;
-
-    var didSetProperty = RootState.loaded.saved.didSetProperty;
-    var propertyWasReset = RootState.loaded.updated.uncommitted.propertyWasReset;
-
-    var dirtySetup = function(fragment) {
-      var record = get(fragment, '_owner');
-      var key = get(fragment, '_name');
-
-      // A newly created fragment may not have an owner yet
-      if (record) {
-        record.fragmentDidDirty(key, fragment);
-      }
-    };
+    var model$fragments$lib$fragments$array$fragment$$get = ember$lib$main$$default.get;
+    var model$fragments$lib$fragments$array$fragment$$map = ember$lib$main$$default.EnumerableUtils.map;
 
     /**
-      Like `DS.Model` instances, all fragments have a `currentState` property
-      that reflects where they are in the model lifecycle. However, there are much
-      fewer states that a fragment can be in, since the `loading` state doesn't
-      apply, `inFlight` states are no different than the owner record's, and there
-      is no concept of a `deleted` state.
+      A state-aware array of fragments that is tied to an attribute of a `DS.Model`
+      instance. `FragmentArray` instances should not be created directly, instead
+      use the `DS.hasManyFragments` attribute.
 
-      This is the simplified hierarchy of valid states for a fragment:
-
-      ```text
-      * root
-        * empty
-        * loaded
-          * created
-          * saved
-          * updated
-      ```
-
-      Note that there are no `uncommitted` sub-states because it's implied by the
-      `created` and `updated` states (since there are no `inFlight` substates).
-
-      @class FragmentRootState
-    */
-    var FragmentRootState = {
-      // Include all `DS.Model` state booleans for consistency
-      isEmpty: false,
-      isLoading: false,
-      isLoaded: false,
-      isDirty: false,
-      isSaving: false,
-      isDeleted: false,
-      isNew: false,
-      isValid: true,
-
-      didSetProperty: didSetProperty,
-
-      propertyWasReset: Ember.K,
-
-      becomeDirty: Ember.K,
-
-      rolledBack: Ember.K,
-
-      empty: {
-        isEmpty: true,
-
-        loadedData: function(fragment) {
-          fragment.transitionTo('loaded.created');
-        },
-
-        pushedData: function(fragment) {
-          fragment.transitionTo('loaded.saved');
-        }
-      },
-
-      loaded: {
-        pushedData: function(fragment) {
-          fragment.transitionTo('saved');
-        },
-
-        saved: {
-          setup: function(fragment) {
-            var record = get(fragment, '_owner');
-            var key = get(fragment, '_name');
-
-            // Abort if fragment is still initializing
-            if (!record._fragments[key] || fragment._isInitializing) { return; }
-
-            // Reset the property on the owner record if no other siblings
-            // are dirty (or there are no siblings)
-            if (!get(record, key + '.isDirty')) {
-              record.fragmentDidReset(key, fragment);
-            }
-          },
-
-          pushedData: Ember.K,
-
-          becomeDirty: function(fragment) {
-            fragment.transitionTo('updated');
-          }
-        },
-
-        created: {
-          isDirty: true,
-
-          setup: dirtySetup,
-        },
-
-        updated: {
-          isDirty: true,
-
-          setup: dirtySetup,
-
-          propertyWasReset: propertyWasReset,
-
-          rolledBack: function(fragment) {
-            fragment.transitionTo('saved');
-          }
-        }
-      }
-    };
-
-    function mixin(original, hash) {
-      for (var prop in hash) {
-        original[prop] = hash[prop];
-      }
-
-      return original;
-    }
-
-    // Wouldn't it be awesome if this was public?
-    function wireState(object, parent, name) {
-      object = mixin(parent ? Ember.create(parent) : {}, object);
-      object.parentState = parent;
-      object.stateName = name;
-
-      for (var prop in object) {
-        if (!object.hasOwnProperty(prop) || prop === 'parentState' || prop === 'stateName') {
-          continue;
-        }
-        if (typeof object[prop] === 'object') {
-          object[prop] = wireState(object[prop], object, name + "." + prop);
-        }
-      }
-
-      return object;
-    }
-
-    FragmentRootState = wireState(FragmentRootState, null, 'root');
-
-    __exports__["default"] = FragmentRootState;
-  });
-define("fragments/transform", 
-  ["../snapshot","../transform","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
-    "use strict";
-    var Snapshot = __dependency1__["default"];
-    var Transform = __dependency2__["default"];
-
-    /**
-      @module ember-data.model-fragments
-    */
-
-    var get = Ember.get;
-    var isArray = Ember.isArray;
-    var map = Ember.EnumerableUtils.map;
-
-    /**
-      Transform for all fragment attributes which delegates work to
-      fragment serializers.
-
-      @class FragmentTransform
+      @class FragmentArray
       @namespace DS
-      @extends DS.Transform
+      @extends StatefulArray
     */
-    var FragmentTransform = Transform.extend({
-      deserialize: function(data) {
-        // TODO: figure out how to get a handle to the fragment type here
-        // without having to patch `DS.JSONSerializer#applyTransforms`
-        return data;
+    var model$fragments$lib$fragments$array$fragment$$FragmentArray = model$fragments$lib$fragments$array$stateful$$default.extend({
+      /**
+        The type of fragments the array contains
+
+        @property type
+        @private
+        @type {String}
+      */
+      type: null,
+
+      options: null,
+
+      init: function() {
+        this._super();
+        this._isInitializing = false;
       },
 
-      serialize: function(snapshot) {
-        if (!snapshot) {
-          return null;
-        } else if (isArray(snapshot)) {
-          return map(snapshot, serializeSnapshot);
-        } else {
-          return serializeSnapshot(snapshot);
+      /**
+        @method _processData
+        @private
+        @param {Object} data
+      */
+      _processData: function(data) {
+        var record = model$fragments$lib$fragments$array$fragment$$get(this, 'owner');
+        var store = model$fragments$lib$fragments$array$fragment$$get(record, 'store');
+        var declaredType = model$fragments$lib$fragments$array$fragment$$get(this, 'type');
+        var options = model$fragments$lib$fragments$array$fragment$$get(this, 'options');
+        var key = model$fragments$lib$fragments$array$fragment$$get(this, 'name');
+        var content = model$fragments$lib$fragments$array$fragment$$get(this, 'content');
+
+        // Mark the fragment array as initializing so that state changes are ignored
+        // until after all fragments' data is setup
+        this._isInitializing = true;
+
+        // Map data to existing fragments and create new ones where necessary
+        var processedData = model$fragments$lib$fragments$array$fragment$$map(ember$lib$main$$default.makeArray(data), function(data, i) {
+          var fragment = content[i];
+
+          // Create a new fragment from the data array if needed
+          if (!fragment) {
+            var actualType = model$fragments$lib$fragments$model$$getActualFragmentType(declaredType, options, data);
+            fragment = store.buildFragment(actualType);
+
+            fragment.setProperties({
+              _owner : record,
+              _name  : key
+            });
+          }
+
+          // Initialize the fragment with the data
+          fragment.setupData(data);
+
+          return fragment;
+        });
+
+        this._isInitializing = false;
+
+        return processedData;
+      },
+
+      /**
+        @method _createSnapshot
+        @private
+      */
+      _createSnapshot: function() {
+        // Snapshot each fragment
+        return model$fragments$lib$fragments$array$fragment$$map(this, function(fragment) {
+          return fragment._createSnapshot();
+        });
+      },
+
+      /**
+        @method adapterDidCommit
+      */
+      adapterDidCommit: function() {
+        this._super();
+
+        // Notify all records of commit
+        this.invoke('adapterDidCommit');
+      },
+
+      /**
+        If this property is `true`, either the contents of the array do not match
+        its original state, or one or more of the fragments in the array are dirty.
+
+        Example
+
+        ```javascript
+        array.toArray(); // [ <Fragment:1>, <Fragment:2> ]
+        array.get('isDirty'); // false
+        array.get('firstObject').set('prop', 'newValue');
+        array.get('isDirty'); // true
+        ```
+
+        @property isDirty
+        @type {Boolean}
+        @readOnly
+      */
+      isDirty: function() {
+        return this._super() || this.isAny('isDirty');
+      }.property('@each.isDirty', '_originalState'),
+
+      /**
+        This method reverts local changes of the array's contents to its original
+        state, and calls `rollback` on each fragment.
+
+        Example
+
+        ```javascript
+        array.get('firstObject').get('isDirty'); // true
+        array.get('isDirty'); // true
+        array.rollback();
+        array.get('firstObject').get('isDirty'); // false
+        array.get('isDirty'); // false
+        ```
+
+        @method rollback
+      */
+      rollback: function() {
+        this._super();
+        this.invoke('rollback');
+      },
+
+      /**
+        Serializing a fragment array returns a new array containing the results of
+        calling `serialize` on each fragment in the array.
+
+        @method serialize
+        @return {Array}
+      */
+      serialize: function() {
+        return this.invoke('serialize');
+      },
+
+      replaceContent: function(idx, amt, fragments) {
+        var array = this;
+        var record = model$fragments$lib$fragments$array$fragment$$get(this, 'owner');
+        var key = model$fragments$lib$fragments$array$fragment$$get(this, 'name');
+
+        // Since all array manipulation methods end up using this method, ensure
+        // ensure that fragments are the correct type and have an owner and name
+        if (fragments) {
+          fragments.forEach(function(fragment) {
+            var owner = model$fragments$lib$fragments$array$fragment$$get(fragment, '_owner');
+
+                        
+            if (!owner) {
+              fragment.setProperties({
+                _owner : record,
+                _name  : key
+              });
+            }
+          });
         }
+
+        return model$fragments$lib$fragments$array$fragment$$get(this, 'content').replace(idx, amt, fragments);
+      },
+
+      /**
+        Adds an existing fragment to the end of the fragment array. Alias for
+        `addObject`.
+
+        @method addFragment
+        @param {DS.ModelFragment} fragment
+        @return {DS.ModelFragment} the newly added fragment
+      */
+      addFragment: function(fragment) {
+        return this.addObject(fragment);
+      },
+
+      /**
+        Removes the given fragment from the array. Alias for `removeObject`.
+
+        @method removeFragment
+        @param {DS.ModelFragment} fragment
+        @return {DS.ModelFragment} the removed fragment
+      */
+      removeFragment: function(fragment) {
+        return this.removeObject(fragment);
+      },
+
+      /**
+        Creates a new fragment of the fragment array's type and adds it to the end
+        of the fragment array
+
+        @method createFragment
+        @param {DS.ModelFragment} fragment
+        @return {DS.ModelFragment} the newly added fragment
+        */
+      createFragment: function(props) {
+        var record = model$fragments$lib$fragments$array$fragment$$get(this, 'owner');
+        var store = model$fragments$lib$fragments$array$fragment$$get(record, 'store');
+        var type = model$fragments$lib$fragments$array$fragment$$get(this, 'type');
+        var fragment = store.createFragment(type, props);
+
+        return this.pushObject(fragment);
       }
     });
 
-    function serializeSnapshot(snapshot) {
-      // The snapshot can be a primitive value (which could be an object)
-      if (!(snapshot instanceof Snapshot)) {
-        return snapshot;
-      }
-
-      return get(snapshot, 'record.store').serializerFor(snapshot.typeKey).serialize(snapshot);
-    }
-
-    __exports__["default"] = FragmentTransform;
-  });
-define("initializers", 
-  ["./fragments/transform","exports"],
-  function(__dependency1__, __exports__) {
-    "use strict";
-    var FragmentTransform = __dependency1__["default"];
-
-    var initializers = [
-      {
-        name: "fragmentTransform",
-        before: "store",
-
-        initialize: function(container, application) {
-          application.register('transform:fragment', FragmentTransform);
-        }
-      }
-    ];
-
-    __exports__["default"] = initializers;
-  });
-define("main", 
-  ["ember","./fragments/ext","./fragments/model","./fragments/array/fragment","./fragments/transform","./fragments/attributes","./initializers","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
-    "use strict";
-    var Ember = __dependency1__["default"];
-    var ext = __dependency2__["default"];
-    var ModelFragment = __dependency3__["default"];
-    var FragmentArray = __dependency4__["default"];
-    var FragmentTransform = __dependency5__["default"];
-    var hasOneFragment = __dependency6__.hasOneFragment;
-    var hasManyFragments = __dependency6__.hasManyFragments;
-    var fragmentOwner = __dependency6__.fragmentOwner;
-    var initializers = __dependency7__["default"];
-
-    /**
-      Ember Data Model Fragments
-
-      @module ember-data.model-fragments
-      @main ember-data.model-fragments
-    */
-
-    DS.ModelFragment = ModelFragment;
-    DS.FragmentArray = FragmentArray;
-    DS.FragmentTransform = FragmentTransform;
-    DS.hasOneFragment = hasOneFragment;
-    DS.hasManyFragments = hasManyFragments;
-    DS.fragmentOwner = fragmentOwner;
-
-    Ember.onLoad('Ember.Application', function(Application) {
-      initializers.forEach(Application.initializer, Application);
-    });
-
-    if (Ember.libraries) {
-      Ember.libraries.register('Model Fragments', '0.3.3');
-    }
-
-    // Something must be exported...
-    __exports__["default"] = DS;
-  });
-define("model", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = DS.Model;
-  });
-define("snapshot", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = DS.Snapshot;
-  });
-define("states", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = DS.RootState;
-  });
-define("store", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = DS.Store;
-  });
-define("transform", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    __exports__["default"] = DS.Transform;
-  });
-define("util/ember-new-computed", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    var Ember = window.Ember;
-    var computed = Ember.computed;
-    var supportsSetterGetter;
+    var model$fragments$lib$fragments$array$fragment$$default = model$fragments$lib$fragments$array$fragment$$FragmentArray;
+    var model$fragments$lib$util$ember$new$computed$$Ember = window.Ember;
+    var model$fragments$lib$util$ember$new$computed$$computed = model$fragments$lib$util$ember$new$computed$$Ember.computed;
+    var model$fragments$lib$util$ember$new$computed$$supportsSetterGetter;
 
     try {
-      Ember.computed({
+      model$fragments$lib$util$ember$new$computed$$Ember.computed({
         set: function() { },
         get: function() { }
       });
-      supportsSetterGetter = true;
+      model$fragments$lib$util$ember$new$computed$$supportsSetterGetter = true;
     } catch(e) {
-      supportsSetterGetter = false;
+      model$fragments$lib$util$ember$new$computed$$supportsSetterGetter = false;
     }
 
-    __exports__["default"] = function() {
+    var model$fragments$lib$util$ember$new$computed$$default = function() {
       var polyfillArguments = [];
       var config = arguments[arguments.length - 1];
 
-      if (typeof config === 'function' || supportsSetterGetter) {
-        return computed.apply(this, arguments);
+      if (typeof config === 'function' || model$fragments$lib$util$ember$new$computed$$supportsSetterGetter) {
+        return model$fragments$lib$util$ember$new$computed$$computed.apply(this, arguments);
       }
 
       for (var i = 0, l = arguments.length - 1; i < l; i++) {
@@ -1665,8 +1127,386 @@ define("util/ember-new-computed",
 
       polyfillArguments.push(func);
 
-      return computed.apply(this, polyfillArguments);
+      return model$fragments$lib$util$ember$new$computed$$computed.apply(this, polyfillArguments);
+    };
+
+    /**
+      @module ember-data.model-fragments
+    */
+
+    var model$fragments$lib$fragments$attributes$$get = ember$lib$main$$default.get;
+
+    function model$fragments$lib$fragments$attributes$$setFragmentOwner(fragment, record, key) {
+            return fragment.setProperties({
+        _owner : record,
+        _name  : key
+      });
     }
-  });
-requireModule("main")["default"];
-}());
+
+
+    /**
+      `DS.hasOneFragment` defines an attribute on a `DS.Model` or `DS.ModelFragment`
+      instance. Much like `DS.belongsTo`, it creates a property that returns a
+      single fragment of the given type.
+
+      `DS.hasOneFragment` takes an optional hash as a second parameter, currently
+      supported options are:
+
+      - `defaultValue`: An object literal or a function to be called to set the
+        attribute to a default value if none is supplied. Values are deep copied
+        before being used. Note that default values will be passed through the
+        fragment's serializer when creating the fragment.
+
+      Example
+
+      ```javascript
+      App.Person = DS.Model.extend({
+        name: DS.hasOneFragment('name', { defaultValue: {} })
+      });
+
+      App.Name = DS.ModelFragment.extend({
+        first  : DS.attr('string'),
+        last   : DS.attr('string')
+      });
+      ```
+
+      @namespace
+      @method hasOneFragment
+      @for DS
+      @param {String} type the fragment type
+      @param {Object} options a hash of options
+      @return {Attribute}
+    */
+    function model$fragments$lib$fragments$attributes$$hasOneFragment(declaredTypeName, options) {
+      options = options || {};
+
+      var meta = {
+        type: 'fragment',
+        isAttribute: true,
+        isFragment: true,
+        options: options
+      };
+
+      function setupFragment(record, key, value) {
+        var store = record.store;
+        var data = record._data[key] || model$fragments$lib$fragments$attributes$$getDefaultValue(record, options, 'object');
+        var fragment = record._fragments[key];
+        var actualTypeName = model$fragments$lib$fragments$model$$getActualFragmentType(declaredTypeName, options, data);
+
+        // Regardless of whether being called as a setter or getter, the fragment
+        // may not be initialized yet, in which case the data will contain a
+        // raw response or a stashed away fragment
+
+        // If we already have a processed fragment in _data and our current fragmet is
+        // null simply reuse the one from data. We can be in this state after a rollback
+        // for example
+        if (!fragment && model$fragments$lib$fragments$attributes$$isInstanceOfType(store.modelFor(actualTypeName), data)) {
+          fragment = data;
+        // Else initialize the fragment
+        } else if (data && data !== fragment) {
+          fragment || (fragment = model$fragments$lib$fragments$attributes$$setFragmentOwner(store.buildFragment(actualTypeName), record, key));
+          //Make sure to first cache the fragment before calling setupData, so if setupData causes this CP to be accessed
+          //again we have it cached already
+          record._data[key] = fragment;
+          fragment.setupData(data);
+        } else {
+          // Handle the adapter setting the fragment to null
+          fragment = data;
+        }
+
+        return fragment;
+      }
+
+      return model$fragments$lib$util$ember$new$computed$$default({
+        set: function(key, value) {
+          var fragment = setupFragment(this, key, value);
+          var store = this.store;
+
+                    fragment = value ? model$fragments$lib$fragments$attributes$$setFragmentOwner(value, this, key) : null;
+
+          if (this._data[key] !== fragment) {
+            this.fragmentDidDirty(key, fragment);
+          } else {
+            this.fragmentDidReset(key, fragment);
+          }
+
+          return this._fragments[key] = fragment;
+        },
+        get: function(key) {
+          var fragment = setupFragment(this, key);
+          return this._fragments[key] = fragment;
+        }
+      }).meta(meta);
+    }
+
+    // Check whether a fragment is an instance of the given type, respecting model
+    // factory injections
+    function model$fragments$lib$fragments$attributes$$isInstanceOfType(type, fragment) {
+      if (fragment instanceof type) {
+        return true;
+      } else if (ember$lib$main$$default.MODEL_FACTORY_INJECTIONS) {
+        return fragment instanceof type.superclass;
+      }
+
+      return false;
+    }
+
+    /**
+      `DS.hasManyFragments` defines an attribute on a `DS.Model` or
+      `DS.ModelFragment` instance. Much like `DS.hasMany`, it creates a property
+      that returns an array of fragments of the given type. The array is aware of
+      its original state and so has a `isDirty` property and a `rollback` method.
+      If a fragment type is not given, values are not converted to fragments, but
+      passed straight through.
+
+      `DS.hasOneFragment` takes an optional hash as a second parameter, currently
+      supported options are:
+
+      - `defaultValue`: An array literal or a function to be called to set the
+        attribute to a default value if none is supplied. Values are deep copied
+        before being used. Note that default values will be passed through the
+        fragment's serializer when creating the fragment.
+
+      Example
+
+      ```javascript
+      App.Person = DS.Model.extend({
+        addresses: DS.hasManyFragments('name', { defaultValue: [] })
+      });
+
+      App.Address = DS.ModelFragment.extend({
+        street  : DS.attr('string'),
+        city    : DS.attr('string'),
+        region  : DS.attr('string'),
+        country : DS.attr('string')
+      });
+      ```
+
+      @namespace
+      @method hasManyFragments
+      @for DS
+      @param {String} type the fragment type (optional)
+      @param {Object} options a hash of options
+      @return {Attribute}
+    */
+    function model$fragments$lib$fragments$attributes$$hasManyFragments(declaredTypeName, options) {
+      // If a declaredTypeName is not given, it implies an array of primitives
+      if (ember$lib$main$$default.typeOf(declaredTypeName) !== 'string') {
+        options = declaredTypeName;
+        declaredTypeName = null;
+      }
+
+      options = options || {};
+
+      var meta = {
+        type: 'fragment',
+        isAttribute: true,
+        isFragment: true,
+        options: options,
+        kind: 'hasMany'
+      };
+
+      function createArray(record, key) {
+        var arrayClass = declaredTypeName ? model$fragments$lib$fragments$array$fragment$$default : model$fragments$lib$fragments$array$stateful$$default;
+
+        return arrayClass.create({
+          type    : declaredTypeName,
+          options : options,
+          name    : key,
+          owner   : record
+        });
+      }
+
+      function setupArrayFragment(record, key, value) {
+        var data = record._data[key] || model$fragments$lib$fragments$attributes$$getDefaultValue(record, options, 'array');
+        var fragments = record._fragments[key] || null;
+
+        //If we already have a processed fragment in _data and our current fragmet is
+        //null simply reuse the one from data. We can be in this state after a rollback
+        //for example
+        if (data instanceof model$fragments$lib$fragments$array$stateful$$default && !fragments) {
+          fragments = data;
+        // Create a fragment array and initialize with data
+        } else if (data && data !== fragments) {
+          fragments || (fragments = createArray(record, key));
+          record._data[key] = fragments;
+          fragments.setupData(data);
+        } else {
+          // Handle the adapter setting the fragment array to null
+          fragments = data;
+        }
+
+        return fragments;
+      }
+
+      return model$fragments$lib$util$ember$new$computed$$default({
+        set: function(key, value) {
+          var fragments = setupArrayFragment(this, key, value);
+
+          if (ember$lib$main$$default.isArray(value)) {
+            fragments || (fragments = createArray(this, key));
+            fragments.setObjects(value);
+          } else if (value === null) {
+            fragments = null;
+          } else {
+                      }
+
+          if (this._data[key] !== fragments || model$fragments$lib$fragments$attributes$$get(fragments, 'isDirty')) {
+            this.fragmentDidDirty(key, fragments);
+          } else {
+            this.fragmentDidReset(key, fragments);
+          }
+
+          return this._fragments[key] = fragments;
+        },
+        get: function(key) {
+          var fragments = setupArrayFragment(this, key);
+          return this._fragments[key] = fragments;
+        }
+      }).meta(meta);
+    }
+
+    // Like `DS.belongsTo`, when used within a model fragment is a reference
+    // to the owner record
+    /**
+      `DS.fragmentOwner` defines a read-only attribute on a `DS.ModelFragment`
+      instance. The attribute returns a reference to the fragment's owner
+      record.
+
+      Example
+
+      ```javascript
+      App.Person = DS.Model.extend({
+        name: DS.hasOneFragment('name')
+      });
+
+      App.Name = DS.ModelFragment.extend({
+        first  : DS.attr('string'),
+        last   : DS.attr('string'),
+        person : DS.fragmentOwner()
+      });
+      ```
+
+      @namespace
+      @method fragmentOwner
+      @for DS
+      @return {Attribute}
+    */
+    function model$fragments$lib$fragments$attributes$$fragmentOwner() {
+      // TODO: add a warning when this is used on a non-fragment
+      return ember$lib$main$$default.computed.alias('_owner').readOnly();
+    }
+
+    // The default value of a fragment is either an array or an object,
+    // which should automatically get deep copied
+    function model$fragments$lib$fragments$attributes$$getDefaultValue(record, options, type) {
+      var value;
+
+      if (typeof options.defaultValue === "function") {
+        value = options.defaultValue();
+      } else if (options.defaultValue) {
+        value = options.defaultValue;
+      } else {
+        return null;
+      }
+
+      
+      // Create a deep copy of the resulting value to avoid shared reference errors
+      return ember$lib$main$$default.copy(value, true);
+    }
+
+    /**
+      @module ember-data.model-fragments
+    */
+
+    var model$fragments$lib$fragments$transform$$get = Ember.get;
+    var model$fragments$lib$fragments$transform$$isArray = Ember.isArray;
+    var model$fragments$lib$fragments$transform$$map = Ember.EnumerableUtils.map;
+
+    /**
+      Transform for all fragment attributes which delegates work to
+      fragment serializers.
+
+      @class FragmentTransform
+      @namespace DS
+      @extends DS.Transform
+    */
+    var model$fragments$lib$fragments$transform$$FragmentTransform = ember$data$lib$system$transform$$default.extend({
+      deserialize: function(data) {
+        // TODO: figure out how to get a handle to the fragment type here
+        // without having to patch `DS.JSONSerializer#applyTransforms`
+        return data;
+      },
+
+      serialize: function(snapshot) {
+        if (!snapshot) {
+          return null;
+        } else if (model$fragments$lib$fragments$transform$$isArray(snapshot)) {
+          return model$fragments$lib$fragments$transform$$map(snapshot, model$fragments$lib$fragments$transform$$serializeSnapshot);
+        } else {
+          return model$fragments$lib$fragments$transform$$serializeSnapshot(snapshot);
+        }
+      }
+    });
+
+    function model$fragments$lib$fragments$transform$$serializeSnapshot(snapshot) {
+      // The snapshot can be a primitive value (which could be an object)
+      if (!(snapshot instanceof ember$data$lib$system$snapshot$$default)) {
+        return snapshot;
+      }
+
+      var modelName = snapshot.modelName || snapshot.typeKey;
+
+      return model$fragments$lib$fragments$transform$$get(snapshot, 'record.store').serializerFor(modelName).serialize(snapshot);
+    }
+
+    var model$fragments$lib$fragments$transform$$default = model$fragments$lib$fragments$transform$$FragmentTransform;
+
+    var model$fragments$lib$initializers$$initializers = [
+      {
+        name: "fragmentTransform",
+        before: "store",
+
+        initialize: function(container, application) {
+          application.register('transform:fragment', model$fragments$lib$fragments$transform$$default);
+        }
+      }
+    ];
+
+    var model$fragments$lib$initializers$$default = model$fragments$lib$initializers$$initializers;
+
+    function model$fragments$lib$main$$exportMethods(scope) {
+      scope.ModelFragment = model$fragments$lib$fragments$model$$default;
+      scope.FragmentArray = model$fragments$lib$fragments$array$fragment$$default;
+      scope.FragmentTransform = model$fragments$lib$fragments$transform$$default;
+      scope.hasOneFragment = model$fragments$lib$fragments$attributes$$hasOneFragment;
+      scope.hasManyFragments = model$fragments$lib$fragments$attributes$$hasManyFragments;
+      scope.fragmentOwner = model$fragments$lib$fragments$attributes$$fragmentOwner;
+    }
+
+    /**
+      Ember Data Model Fragments
+
+      @module ember-data.model-fragments
+      @main ember-data.model-fragments
+    */
+    var model$fragments$lib$main$$MF = ember$lib$main$$default.Namespace.create({
+      VERSION: '0.3.3+be9c8c8b'
+    });
+
+    model$fragments$lib$main$$exportMethods(model$fragments$lib$main$$MF);
+
+    // This will be removed at some point in favor of the `MF` namespace
+    model$fragments$lib$main$$exportMethods(ember$data$lib$main$$default);
+
+    ember$lib$main$$default.onLoad('Ember.Application', function(Application) {
+      model$fragments$lib$initializers$$default.forEach(Application.initializer, Application);
+    });
+
+    if (ember$lib$main$$default.libraries) {
+      ember$lib$main$$default.libraries.register('Model Fragments', model$fragments$lib$main$$MF.VERSION);
+    }
+
+    var model$fragments$lib$main$$default = model$fragments$lib$main$$MF;
+}).call(this);
+
